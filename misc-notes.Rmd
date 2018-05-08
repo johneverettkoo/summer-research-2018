@@ -1,7 +1,7 @@
 ---
 title: 'Spectral Clustering'
-# output: pdf_document
-output: html_document
+output: pdf_document
+# output: html_document
 # geometry: "left=1cm,right=1cm,top=1cm,bottom=1.5cm"
 urlcolor: blue
 header-includes:
@@ -60,11 +60,11 @@ Note that $m_1$ and $m_2$ are functions of $k$.
 ### Numerical results
 
 Using an arbitrary vector $\vect{x} \in \mathbb{R}^n$ such that 
-$|\vect{x}|_1 = 0$ and $|\vect{x}|_2^2 = n$:
+$\sum_i x_i = 0$ and $|\vect{x}|_2^2 = n$:
 
 ```{r}
 library(ggplot2)
-import::from(magrittr, `%>%`)
+import::from(magrittr, `%>%`, `%<>%`)
 theme_set(theme_bw())
 
 normalize <- function(x) {
@@ -250,16 +250,176 @@ $$-\frac{(R(k))^2}{4n} = -n - \frac{k(n-k)}{n} m_1^2 - \frac{k(n-k)}{n} m_2^2 -
 
 Then noting that some terms cancel each other out, $R(k) - \frac{(R(k))^2}{4n}$:
 
-$$n - \frac{k(n-k}{n} m_1^2 - \frac{k(n-k)}{n} m_2^2 + 
+$$n - \frac{k(n-k)}{n} m_1^2 - \frac{k(n-k)}{n} m_2^2 + 
   2 \frac{k(n-k)}{n} m_1 m_2$$
 $$= n - \frac{k(n-k)}{n}(m_1^2 + m_2^2 - 2 m_1 m_2)$$
 $$\boxed{= n - \frac{k(n-k)}{n}(m_1 - m_2)^2}$$
 
 Which is exactly the same as our expression for $W(k)$.
 
-## $k > 2$
+## Arbitrary $k$
 
 When $k > 2$, the methods as prescribed by Luxburg involve embedding the 
 graph to $\mathbb{R}^k$ and then performing $k$-means clustering. In this case, 
 we cannot perform the same sort of analysis since there is no way to "order" 
 the $x_i$'s. 
+
+### Numerical experiments for $k = 2$ and $\mathbb{R}^2$
+
+#### Double spiral
+
+We will generate a "double spiral" to be partitioned into two clusters. This 
+is an example that $k$-means would fail but is fairly distinguishable visually 
+or intuitively. After generating the spiral, we will construct a $k$-nearest 
+neighbors graph.
+
+```{r generate_double_spiral}
+# borrow some functions from S675
+source('http://pages.iu.edu/~mtrosset/Courses/675/manifold.r')
+
+# parameters
+set.seed(112358)
+s <- 2 ** 5
+eps <- 2 ** -2
+k <- 10
+cols2 <- colorRampPalette(c('blue', 'white', 'red'))(256)
+rad.max <- 10
+ang.max <- 2 * pi
+angles <- seq(0, ang.max, length.out = 100)
+radii <- seq(1, sqrt(rad.max), length.out = 100) ** 2
+
+# data
+spiral.df <- dplyr::data_frame(X = radii * cos(angles), 
+                               Y = radii * sin(angles))
+spiral.df <- dplyr::data_frame(X = radii * cos(angles), 
+                               Y = radii * sin(angles))
+neg.spiral.df <- dplyr::mutate(spiral.df, 
+                               X = -X, Y = -Y, 
+                               id = '2')
+spiral.df %<>% 
+  dplyr::mutate(id = '1') %>% 
+  dplyr::bind_rows(neg.spiral.df) %>% 
+  dplyr::mutate(X = X + rnorm(n = n(), sd = eps), 
+                Y = Y + rnorm(n = n(), sd = eps))
+
+n <- nrow(spiral.df)
+
+# viz
+ggplot(spiral.df) + 
+  geom_point(aes(x = X, y = Y)) + 
+  coord_fixed()
+
+ggplot(spiral.df) + 
+  geom_point(aes(x = X, y = Y, colour = id)) + 
+  coord_fixed() + 
+  scale_colour_brewer(palette = 'Set1')
+```
+
+Then we will construct a(n) `r k`-nearest-neighbors graph:
+
+```{r knn-graph}
+# construct W
+W <- spiral.df %>% 
+  dplyr::select(X, Y) %>% 
+  as.matrix() %>% 
+  mds.edm1() %>% 
+  graph.knn(k) %>% 
+  graph.adj()
+
+# viz
+qgraph::qgraph(W) 
+```
+
+Here it is pretty obvious how we should cut the graph.
+
+Then proceed with the clustering method as described by Luxburg:
+
+```{r spec_clust}
+# construct L
+L <- graph.laplacian(W)
+
+# eigendecomposition
+L.eigen <- eigen(L)
+
+two.eigen.df <- L.eigen$vectors[, c(n - 2, n - 1)] %>% 
+  as.data.frame() %>% 
+  dplyr::mutate(id = spiral.df$id) %>% 
+  dplyr::mutate(X1 = V1 / sqrt(L.eigen$values[n - 2]), 
+                X2 = V2 / sqrt(L.eigen$values[n - 1]))
+```
+
+Then we can take a look at the projection to $\mathbb{R}^2$:
+
+```{r h_space}
+ggplot(two.eigen.df) + 
+  geom_point(aes(x = V1, y = V2, colour = id)) + 
+  coord_fixed() + 
+  scale_colour_brewer(palette = 'Set1') + 
+  labs(title = 'unscaled')
+
+ggplot(two.eigen.df) + 
+  geom_point(aes(x = X1, y = X2, colour = id)) + 
+  coord_fixed() + 
+  scale_colour_brewer(palette = 'Set1') + 
+  labs(title = 'scaled')
+
+ggplot(two.eigen.df) + 
+  geom_point(aes(x = V2, y = 0, colour = id), 
+             alpha = .1) + 
+  scale_colour_brewer(palette = 'Set1') + 
+  labs(title = 'projection to R')
+```
+
+Next, we can take a look at how the three methods correspond to our original 
+labels:
+
+```{r correspondence}
+ggplot(two.eigen.df) + 
+  geom_point(aes(x = V1, y = V2)) + 
+  coord_fixed()
+
+unscaled.clustering <- two.eigen.df %>% 
+  dplyr::select(V1, V2) %>% 
+  dist() %>% 
+  kmeans(2)
+
+scaled.clustering <- two.eigen.df %>% 
+  dplyr::select(X1, X2) %>% 
+  dist() %>% 
+  kmeans(2)
+
+one.d.clustering <- two.eigen.df %>% 
+  dplyr::select(X2) %>% 
+  dist() %>% 
+  kmeans(2)
+
+spiral.df %<>% 
+  dplyr::mutate(unscaled = as.character(unscaled.clustering$cluster), 
+                scaled = as.character(scaled.clustering$cluster), 
+                one.d = as.character(one.d.clustering$cluster))
+
+table(spiral.df$id, spiral.df$unscaled)
+table(spiral.df$id, spiral.df$scaled)
+table(spiral.df$id, spiral.df$one.d)
+
+ggplot(spiral.df) + 
+  geom_point(aes(x = X, y = Y, colour = unscaled)) + 
+  coord_fixed() + 
+  scale_colour_brewer(palette = 'Set1')
+
+ggplot(spiral.df) + 
+  geom_point(aes(x = X, y = Y, colour = scaled)) + 
+  coord_fixed() + 
+  scale_colour_brewer(palette = 'Set1')
+
+ggplot(spiral.df) + 
+  geom_point(aes(x = X, y = Y, colour = one.d)) + 
+  coord_fixed() + 
+  scale_colour_brewer(palette = 'Set1')
+```
+
+In a way, we have "unraveled" the spirals, resulting in two curves. Eye-balling 
+this representation gives us two obvious clusters, but $k$-means fails to 
+separate them the way we would expect since they are not spherical clusters. 
+Projection to the unscaled space seems to perform especially poorly, and the 
+plots of the columns of $H$ reveal why.
