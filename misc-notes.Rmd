@@ -1,7 +1,7 @@
 ---
 title: 'Spectral Clustering'
-output: pdf_document
-# output: html_document
+# output: pdf_document
+output: html_document
 # geometry: "left=1cm,right=1cm,top=1cm,bottom=1.5cm"
 urlcolor: blue
 header-includes:
@@ -63,9 +63,12 @@ Using an arbitrary vector $\vect{x} \in \mathbb{R}^n$ such that
 $\sum_i x_i = 0$ and $|\vect{x}|_2^2 = n$:
 
 ```{r}
+# packages
 library(ggplot2)
 import::from(magrittr, `%>%`, `%<>%`)
 theme_set(theme_bw())
+
+# --- functions --- #
 
 normalize <- function(x) {
   y <- x - mean(x)
@@ -167,7 +170,7 @@ ggplot(coefs.df) +
 The intercept term stays at 0 and the linear term stays at 1. Looking closer
 at the quadratic term:
 
-```{r}
+```{r, fig.height = 3, fig.width = 4}
 ggplot(coefs.df) + 
   geom_point(aes(x = n, y = a2 ** -1)) + 
   labs(y = expression(a[2]^-1))
@@ -423,3 +426,55 @@ this representation gives us two obvious clusters, but $k$-means fails to
 separate them the way we would expect since they are not spherical clusters. 
 Projection to the unscaled space seems to perform especially poorly, and the 
 plots of the columns of $H$ reveal why.
+
+```{r proj_clust}
+two.eigen.df %<>% 
+  dplyr::mutate(unscaled.clust = as.character(unscaled.clustering$cluster), 
+                scaled.clust = as.character(scaled.clustering$cluster), 
+                one.d.clust = as.character(one.d.clustering$cluster))
+
+clust.list <- list('unscaled.clust', 'scaled.clust', 'one.d.clust')
+
+clust.plots <- lapply(clust.list, function(i) {
+  ggplot(two.eigen.df) + 
+    geom_point(aes_string(x = 'X1', y = 'X2', colour = i)) + 
+    scale_colour_brewer(palette = 'Set1') + 
+    coord_fixed() + 
+    guides(colour = FALSE) + 
+    labs(x = NULL, y = NULL)
+})
+
+.gridarrange <- function(...) gridExtra::grid.arrange(..., ncol = 3)
+do.call(.gridarrange, clust.plots)
+```
+
+In fact, it almost looks as if another clustering method is more appropriate 
+here, in particular, single-linkage
+
+```{r heirarchical_clust}
+single.link.clust <- two.eigen.df %>% 
+  dplyr::select(V1, V2) %>% 
+  dist() %>% 
+  hclust(method = 'single') %>% 
+  cutree(2)
+
+two.eigen.df %<>%
+  dplyr::mutate(single.link.clust = as.character(single.link.clust))
+spiral.df %<>% 
+  dplyr::mutate(single.link.clust = as.character(single.link.clust))
+
+ggplot(two.eigen.df) + 
+  geom_point(aes(x = V1, y = V2, colour = single.link.clust)) + 
+  coord_fixed() + 
+  scale_colour_brewer(palette = 'Set1')
+
+ggplot(spiral.df) + 
+  geom_point(aes(x = X, y = Y, colour = single.link.clust)) + 
+  coord_fixed() + 
+  scale_colour_brewer(palette = 'Set1')
+
+table(spiral.df$id, spiral.df$single.link.clust)
+```
+
+However, this may be a consequence of this particular problem. The two spirals 
+are basically two intertwined strands. 
