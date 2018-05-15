@@ -1,7 +1,7 @@
 ---
 title: 'Spectral Clustering'
-# output: pdf_document
-output: html_document
+output: pdf_document
+# output: html_document
 # geometry: "left=1cm,right=1cm,top=1cm,bottom=1.5cm"
 urlcolor: blue
 header-includes:
@@ -23,6 +23,7 @@ options(xtable.comment = FALSE,
 ```
 
 \newcommand{\vect}[1]{\overrightarrow{#1}}
+\newcommand{\tr}{\text{Tr}}
 
 Much of this uses information from [A Tutorial on Spectral
 Clustering](http://www.kyb.mpg.de/fileadmin/user_upload/files/publications/attachments/Luxburg07_tutorial_4488%5b0%5d.pdf) by Ulrike von Luxburg and [Proximity in Statistical 
@@ -67,6 +68,7 @@ $\sum_i x_i = 0$ and $|\vect{x}|_2^2 = n$:
 library(ggplot2)
 import::from(magrittr, `%>%`, `%<>%`)
 theme_set(theme_bw())
+import::from(psych, tr)
 
 # --- functions --- #
 
@@ -262,7 +264,7 @@ Which is exactly the same as our expression for $W(k)$.
 
 ## Arbitrary $k$
 
-When $k > 2$, the methods as prescribed by Luxburg involve embedding the 
+For arbitrary $k$, the methods as prescribed by Luxburg involve embedding the 
 graph to $\mathbb{R}^k$ and then performing $k$-means clustering. In this case, 
 we cannot perform the same sort of analysis since there is no way to "order" 
 the $x_i$'s. 
@@ -425,7 +427,7 @@ In a way, we have "unraveled" the spirals, resulting in two curves. Eye-balling
 this representation gives us two obvious clusters, but $k$-means fails to 
 separate them the way we would expect since they are not spherical clusters. 
 Projection to the unscaled space seems to perform especially poorly, and the 
-plots of the columns of $H$ reveal why.
+plots of the columns of $H_{approx}$ reveal why.
 
 ```{r proj_clust}
 two.eigen.df %<>% 
@@ -449,7 +451,7 @@ do.call(.gridarrange, clust.plots)
 ```
 
 In fact, it almost looks as if another clustering method is more appropriate 
-here, in particular, single-linkage
+here, in particular, single-linkage.
 
 ```{r heirarchical_clust}
 single.link.clust <- two.eigen.df %>% 
@@ -476,5 +478,84 @@ ggplot(spiral.df) +
 table(spiral.df$id, spiral.df$single.link.clust)
 ```
 
-However, this may be a consequence of this particular problem. The two spirals 
-are basically two intertwined strands. 
+We should also check that this clustering is actually better according to the 
+metrics from the Luxburg tutorial. We try this two ways: 
+
+1. $H_{approx}$ should be as close of an approximation to $H$ as possible. 
+Here, $H_{approx}$ is the $k$-dimensional embedding via spectral decomposition 
+while $H$ defines the actual best clustering. In this comparison, we fix 
+$H_{approx}$ and construct $H$ according to the resulting clustering of 
+$H_{approx}$ (e.g., via $k$-means or single-linkage), then compare the 
+constructed $H$ to $H_{approx}$ via the Frobenious norm. 
+
+2. The exact clustering should minimize $\tr(H^T L H)$ where $H$ is defined by 
+the particular clustering. If single-linkage is indeed better than $k$-means in 
+this case, then the $H$ constructed from single-linkage clustering should 
+result in a lower metric than the one constructed from $k$-means clustering.
+
+```{r metrics}
+# construct Happrox
+H.approx <- two.eigen.df %>% 
+  dplyr::select(V2, V1) %>%  # i put this in the wrong order
+  as.matrix()
+
+#' @title construct H function
+#' @description H is constructed based on a vector that designates the clusters
+#' @param clustering (numeric) A vector of cluster assignments
+#' @return (matrix) H based on the cluster assignments
+construct.H <- function(clustering) {
+  # this function is limited to nonempty clusters
+  # e.g., if there are 3 clusters, they must be assigned as 1, 2, 3
+  clusters <- unique(clustering)
+  if (length(clusters) != max(clustering)) {
+    stop(simpleError('there are empty clusters'))
+  }
+  if (min(clustering) < 1) {
+    stop(simpleError('cluster indexing starts at 1'))
+  }
+  
+  # find |A_k|
+  cluster.sizes <- sapply(clusters, function(i) {
+    length(clustering[clustering == i])
+  })
+  
+  # construct H
+  H <- sapply(clustering, function(i) {
+    h <- rep(0, length(clusters))
+    h[i] <- 1 / sqrt(cluster.sizes[i])
+    return(h)
+  }) %>% 
+    t()
+  
+  return(H)
+}
+
+# construct H for k-means (unscaled)
+H.kmeans <- construct.H(unscaled.clustering$cluster)
+
+# construct H for single linkage
+H.singlelink <- construct.H(single.link.clust)
+
+# frobenius norm comparison
+norm(H.approx - H.kmeans, type = 'F')
+norm(H.approx - H.singlelink, type = 'F')
+
+# making sure ordering doesn't matter
+# this could get messy for large k
+norm(H.approx - H.kmeans[, 2:1], type = 'F')
+norm(H.approx - H.singlelink[, 2:1], type = 'F')
+
+# minimizing trace comparison
+# here order doesn't matter
+tr(t(H.kmeans) %*% L %*% H.kmeans)
+tr(t(H.singlelink) %*% L %*% H.singlelink)
+```
+
+Here, we can see that single linkage produces a $H$ matrix that is closer to 
+$H_{approx}$ and results in a better clustering metric. 
+
+However, this may be a very particular case. From the embedding, we can see that 
+while there is a very obvious clustering, the clusters are not ellipsoids, 
+which is what $k$-means is good at. Perhaps in most graph embeddings of this 
+type, we do end up with ellpsoid clusters, and we just happened to get long 
+strands in this example. 
