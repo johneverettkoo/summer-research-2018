@@ -1,5 +1,5 @@
 ---
-title: 'Spectral Clustering'
+title: 'Spectral Clustering Notes'
 output: pdf_document
 # output: html_document
 # geometry: "left=1cm,right=1cm,top=1cm,bottom=1.5cm"
@@ -286,12 +286,14 @@ source('http://pages.iu.edu/~mtrosset/Courses/675/manifold.r')
 set.seed(112358)
 s <- 2 ** 5
 eps <- 2 ** -2
-k <- 10
+k <- 10  # for constructing the knn graph
+K <- 2  # number of clusters
 cols2 <- colorRampPalette(c('blue', 'white', 'red'))(256)
 rad.max <- 10
 ang.max <- 2 * pi
 angles <- seq(0, ang.max, length.out = 100)
 radii <- seq(1, sqrt(rad.max), length.out = 100) ** 2
+N <- 100  # number of times to try k-means clustering
 
 # data
 spiral.df <- dplyr::data_frame(X = radii * cos(angles), 
@@ -307,17 +309,19 @@ spiral.df %<>%
   dplyr::mutate(X = X + rnorm(n = n(), sd = eps), 
                 Y = Y + rnorm(n = n(), sd = eps))
 
-n <- nrow(spiral.df)
+n <- nrow(spiral.df)  # number of vertices
 
 # viz
 ggplot(spiral.df) + 
   geom_point(aes(x = X, y = Y)) + 
-  coord_fixed()
+  coord_fixed() + 
+  labs(title = 'Double spiral')
 
 ggplot(spiral.df) + 
   geom_point(aes(x = X, y = Y, colour = id)) + 
   coord_fixed() + 
-  scale_colour_brewer(palette = 'Set1')
+  scale_colour_brewer(palette = 'Set1') + 
+  labs(title = '"Natural" clustering of the example data')
 ```
 
 Then we will construct a(n) `r k`-nearest-neighbors graph:
@@ -346,11 +350,11 @@ L <- graph.laplacian(W)
 # eigendecomposition
 L.eigen <- eigen(L)
 
-two.eigen.df <- L.eigen$vectors[, c(n - 2, n - 1)] %>% 
+two.eigen.df <- L.eigen$vectors[, seq(n - 1, n - K)] %>% 
   as.data.frame() %>% 
   dplyr::mutate(id = spiral.df$id) %>% 
-  dplyr::mutate(X1 = V1 / sqrt(L.eigen$values[n - 2]), 
-                X2 = V2 / sqrt(L.eigen$values[n - 1]))
+  dplyr::mutate(X1 = V1 / sqrt(L.eigen$values[n - 1]), 
+                X2 = V2 / sqrt(L.eigen$values[n - 2]))
 ```
 
 Then we can take a look at the projection to $\mathbb{R}^2$:
@@ -360,43 +364,47 @@ ggplot(two.eigen.df) +
   geom_point(aes(x = V1, y = V2, colour = id)) + 
   coord_fixed() + 
   scale_colour_brewer(palette = 'Set1') + 
-  labs(title = 'unscaled')
+  labs(title = '2D embedding')
 
 ggplot(two.eigen.df) + 
   geom_point(aes(x = X1, y = X2, colour = id)) + 
   coord_fixed() + 
   scale_colour_brewer(palette = 'Set1') + 
-  labs(title = 'scaled')
+  labs(title = '2D embedding, scaled by eigenvalues')
 
 ggplot(two.eigen.df) + 
-  geom_point(aes(x = V2, y = 0, colour = id), 
+  geom_point(aes(x = V1, y = 0, colour = id), 
              alpha = .1) + 
   scale_colour_brewer(palette = 'Set1') + 
-  labs(title = 'projection to R')
+  labs(title = '1D embedding')
 ```
 
 Next, we can take a look at how the three methods correspond to our original 
 labels:
 
 ```{r correspondence}
-ggplot(two.eigen.df) + 
-  geom_point(aes(x = V1, y = V2)) + 
-  coord_fixed()
+# run each clustering method N times and pick the best one
+multiple.clusterings <- function(input.df, columns, clusters = 2, iter = 100) {
+  # run the k-means algorithm many times
+  clusterings <- lapply(seq(iter), function(i) {
+    input.df %>% 
+      dplyr::select(columns) %>% 
+      dist() %>% 
+      kmeans(clusters)
+  })
+  
+  # see which time was best
+  tot.withinss <- sapply(clusterings, function(clustering) {
+    clustering$tot.withinss
+  })
+  best.clust.ind <- which.min(tot.withinss)[1]
+  
+  return(clusterings[[best.clust.ind]])
+}
 
-unscaled.clustering <- two.eigen.df %>% 
-  dplyr::select(V1, V2) %>% 
-  dist() %>% 
-  kmeans(2)
-
-scaled.clustering <- two.eigen.df %>% 
-  dplyr::select(X1, X2) %>% 
-  dist() %>% 
-  kmeans(2)
-
-one.d.clustering <- two.eigen.df %>% 
-  dplyr::select(X2) %>% 
-  dist() %>% 
-  kmeans(2)
+unscaled.clustering <- multiple.clusterings(two.eigen.df, c('V1', 'V2'), K, N)
+scaled.clustering <- multiple.clusterings(two.eigen.df, c('X1', 'X2'), K, N)
+one.d.clustering <- multiple.clusterings(two.eigen.df, 'X1', K, N)
 
 spiral.df %<>% 
   dplyr::mutate(unscaled = as.character(unscaled.clustering$cluster), 
@@ -410,17 +418,20 @@ table(spiral.df$id, spiral.df$one.d)
 ggplot(spiral.df) + 
   geom_point(aes(x = X, y = Y, colour = unscaled)) + 
   coord_fixed() + 
-  scale_colour_brewer(palette = 'Set1')
+  scale_colour_brewer(palette = 'Set1') + 
+  labs(title = 'k-means clustering results using the unscaled 2D embedding')
 
 ggplot(spiral.df) + 
   geom_point(aes(x = X, y = Y, colour = scaled)) + 
   coord_fixed() + 
-  scale_colour_brewer(palette = 'Set1')
+  scale_colour_brewer(palette = 'Set1') + 
+  labs(title = 'k-means clustering results using the scaled 2D embedding')
 
 ggplot(spiral.df) + 
   geom_point(aes(x = X, y = Y, colour = one.d)) + 
   coord_fixed() + 
-  scale_colour_brewer(palette = 'Set1')
+  scale_colour_brewer(palette = 'Set1') + 
+  labs(title = 'k-means clustering results using the 1D embedding')
 ```
 
 In a way, we have "unraveled" the spirals, resulting in two curves. Eye-balling 
@@ -429,7 +440,7 @@ separate them the way we would expect since they are not spherical clusters.
 Projection to the unscaled space seems to perform especially poorly, and the 
 plots of the columns of $H_{approx}$ reveal why.
 
-```{r proj_clust}
+```{r proj_clust, fig.cap = '2D embedding annotated by cluster assignments. From right to left: k-means on the unscaled embedding, k-means on the scaled embedding, and k-means on the 1D embedding.', fig.height = 3}
 two.eigen.df %<>% 
   dplyr::mutate(unscaled.clust = as.character(unscaled.clustering$cluster), 
                 scaled.clust = as.character(scaled.clustering$cluster), 
@@ -439,7 +450,7 @@ clust.list <- list('unscaled.clust', 'scaled.clust', 'one.d.clust')
 
 clust.plots <- lapply(clust.list, function(i) {
   ggplot(two.eigen.df) + 
-    geom_point(aes_string(x = 'X1', y = 'X2', colour = i)) + 
+    geom_point(aes_string(x = 'V1', y = 'V2', colour = i)) + 
     scale_colour_brewer(palette = 'Set1') + 
     coord_fixed() + 
     guides(colour = FALSE) + 
@@ -549,10 +560,38 @@ norm(H.approx - H.singlelink[, 2:1], type = 'F')
 # here order doesn't matter
 tr(t(H.kmeans) %*% L %*% H.kmeans)
 tr(t(H.singlelink) %*% L %*% H.singlelink)
+
+# trace for Happrox
+tr(t(H.approx) %*% L %*% H.approx)
 ```
 
 Here, we can see that single linkage produces a $H$ matrix that is closer to 
 $H_{approx}$ and results in a better clustering metric. 
+
+For completeness, let's check whether single-linkage produced a better 
+clustering according to the $k$-means metric:
+
+```{r tot_withinss_comparison}
+# function for computing total within SS
+within.ss <- function(X, clustering) {
+  clusters <- unique(clustering)
+  sapply(clusters, function(i) {
+    X.clust <- X[clustering == i, ]
+    sum(dist(X.clust) ** 2) / 2 / nrow(X.clust)
+  }) %>% 
+    sum()
+}
+
+# total within-ss from k-means
+within.ss(dplyr::select(two.eigen.df, V1, V2), unscaled.clustering$cluster)
+
+# total within-ss from single linkage
+within.ss(dplyr::select(two.eigen.df, V1, V2), single.link.clust)
+```
+
+And indeed, the $k$-means clustering result resulted in a better $k$-means 
+metric. This conclusively tells us that $k$-means on the embedding is not the 
+best clustering method for this example. 
 
 However, this may be a very particular case. From the embedding, we can see that 
 while there is a very obvious clustering, the clusters are not ellipsoids, 
