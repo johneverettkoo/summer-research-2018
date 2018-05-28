@@ -69,6 +69,7 @@ library(ggplot2)
 import::from(magrittr, `%>%`, `%<>%`)
 theme_set(theme_bw())
 import::from(psych, tr)
+library(qgraph)
 
 # --- functions --- #
 
@@ -269,7 +270,7 @@ graph to $\mathbb{R}^k$ and then performing $k$-means clustering. In this case,
 we cannot perform the same sort of analysis since there is no way to "order" 
 the $x_i$'s. 
 
-### Numerical experiments for $k = 2$ and $\mathbb{R}^2$
+### Numerical experiment for $k = 2$ and $\mathbb{R}^2$
 
 #### Double spiral
 
@@ -336,7 +337,9 @@ W <- spiral.df %>%
   graph.adj()
 
 # viz
-qgraph::qgraph(W) 
+qgraph(W, groups = spiral.df$id, 
+       title = 'kNN nearest graph of the double spiral', 
+       layout = 'spring')
 ```
 
 Here it is pretty obvious how we should cut the graph.
@@ -469,7 +472,7 @@ single.link.clust <- two.eigen.df %>%
   dplyr::select(V1, V2) %>% 
   dist() %>% 
   hclust(method = 'single') %>% 
-  cutree(2)
+  cutree(K)
 
 two.eigen.df %<>%
   dplyr::mutate(single.link.clust = as.character(single.link.clust))
@@ -598,3 +601,164 @@ while there is a very obvious clustering, the clusters are not ellipsoids,
 which is what $k$-means is good at. Perhaps in most graph embeddings of this 
 type, we do end up with ellpsoid clusters, and we just happened to get long 
 strands in this example. 
+
+### Numerical experiment with $k = 5$
+
+For this example, we will look at the "Big 5" data from psychology. In this 
+dataset, 500 students took a 240-question personality quiz. Each question 
+corresponds to one of 5 personality types and is rated on a 5-point scale. We 
+construct a graph using the questions as objects/vertices and the edges as 
+empirical similarities based on how the students responded. 
+
+```{r big5}
+# load the data
+data(big5)
+data(big5groups)
+
+n <- min(dim(big5))  # number of vertices
+K <- length(big5groups)  # number of clusters
+group.names <- names(big5groups)
+N <- 2 ** 10  # number of times to try k-means 
+
+# reformat the groups into a vector
+# this is just so we can do easier comparisons with the clusters
+group.assign <- rep(NA, n)
+for (i in seq(n)) {
+  for (j in group.names) {
+    if (i %in% big5groups[[j]]) {
+      group.assign[i] <- j
+    }
+  }
+}
+
+# similarities
+# just use correlation per the qgraph example
+# and adjust so they're all positive
+W <- (cor(big5) + 1) / 2
+```
+
+```{r big5_viz, cache = TRUE}
+qgraph(W, groups = group.assign, minimum = .5, 
+       borders = FALSE, layout = 'spring')
+```
+
+And then we proceed by constructing the Laplacian, choosing the "first" 5 
+eigenvectors as our embedding, and performing $k$-means clustering with 5 
+clusters.
+
+```{r big5_clust, cache = TRUE}
+# function to create the embedding matrix H
+spect.embed <- function(sim.graph, dims = 2) {
+  L <- graph.laplacian(sim.graph)
+  L.eigen <- eigen(L)
+  L.eigen$vectors[, seq(nrow(L) - 1, nrow(L) - dims)] %>% 
+    as.data.frame() %>% 
+    return()
+}
+
+embed.df <- spect.embed(W, K)
+unscaled.clustering <- multiple.clusterings(embed.df, 
+                                            paste0('V', seq(K)), 
+                                            K, N)
+
+table(unscaled.clustering$cluster, group.assign)
+```
+
+We can see that there isn't much correspondence between the personality types 
+and the clusters. Unfortunately this problem is hard to visualize due to its 
+dimensionality, but we can still compare some clustering metrics. 
+
+First, let's check whether the original groupings would result in a better 
+$k$-means clustering metric (total within sum of squares) than the one that 
+$k$-means found:
+
+```{r kmeans_metric}
+# total within-ss from k-means
+within.ss(embed.df, unscaled.clustering$cluster)
+
+# total within-ss using original group assignments
+within.ss(embed.df, group.assign)
+```
+
+Next, we can compute $\tr(H^T L H)$ for the $k$-means result and then for the 
+original group assignments:
+
+```{r trace_metric}
+H.kmeans <- construct.H(unscaled.clustering$cluster)
+H.original <- construct.H(as.numeric(as.factor(group.assign)))
+
+L <- graph.laplacian(W)
+
+tr(t(H.kmeans) %*% L %*% H.kmeans)
+tr(t(H.original) %*% L %*% H.original)
+```
+
+We can also try single-linkage again and see if that does any better than 
+$k$-means:
+
+```{r single_link}
+single.link.clust <- embed.df %>% 
+  dist() %>% 
+  hclust(method = 'single') %>% 
+  cutree(K)
+
+H.singlelink <- construct.H(single.link.clust)
+
+tr(t(H.singlelink) %*% L %*% H.singlelink)
+
+table(group.assign, single.link.clust)
+```
+
+Strangely, while single linkage does not produce a clustering that looks 
+anything like the original group assignments, it results in a better 
+clustering according to the ratio cut metric. We can try visualizing it:
+
+```{r single_link_viz, cache = TRUE}
+qgraph(W, groups = as.character(single.link.clust), minimum = .5, 
+       borders = FALSE, layout = 'spring')
+```
+
+Finally, we can look at the embedding, $H_{approx}$:
+
+```{r Happrox}
+Happrox <- as.matrix(embed.df)
+tr(t(Happrox) %*% L %*% Happrox)
+```
+
+And again, this value is higher than what we got with single linkage, which is 
+not expected, since this is the solution to the unconstrained optimization 
+problem, whereas the various $H$'s constructed from cluster assignments are 
+solutions to the constrained optimization problem.
+
+We can try this again, except in $\mathbb{R}^4$:
+
+```{r kmeans_R4, cache = TRUE}
+# embed into R4
+embed.r4.df <- spect.embed(W, K - 1)
+
+# k-means clustering with k=5
+unscaled.clustering.r4 <- multiple.clusterings(embed.df, 
+                                               paste0('V', seq(K - 1)), 
+                                               K, N)
+
+# compare to original group assignments
+table(unscaled.clustering.r4$cluster, group.assign)
+table(unscaled.clustering$cluster, unscaled.clustering.r4$cluster)
+
+# ratio cut metric
+H.kmeans.r4 <- construct.H(unscaled.clustering.r4$cluster)
+tr(t(H.kmeans.r4) %*% L %*% H.kmeans.r4)
+
+# try single-link clustering
+single.link.clust.r4 <- embed.r4.df %>% 
+  dist() %>% 
+  hclust(method = 'single') %>% 
+  cutree(K)
+H.singlelink.r4 <- construct.H(single.link.clust.r4)
+tr(t(H.singlelink.r4) %*% L %*% H.singlelink.r4)
+table(group.assign, single.link.clust.r4)
+table(single.link.clust, single.link.clust.r4)
+```
+
+According to the ratio cut metric, embedding in $\mathbb{R}^4$ is equivalent or 
+better than embedding in $\mathbb{R}^5$ in this particular case.
