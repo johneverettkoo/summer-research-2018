@@ -437,6 +437,15 @@ ggplot(spiral.df) +
   labs(title = 'k-means clustering results using the 1D embedding')
 ```
 
+```{r correspondence_graphs, cache = TRUE}
+qgraph(W, groups = spiral.df$unscaled, 
+       title = 'Cluster assignments from k-means on the unscaled embedding')
+qgraph(W, groups = spiral.df$scaled, 
+       title = 'Cluster assignments from k-means on the scaled embedding')
+qgraph(W, groups = spiral.df$one.d, 
+       title = 'Cluster assignments from k-means on the Fiedler vector')
+```
+
 In a way, we have "unraveled" the spirals, resulting in two curves. Eye-balling 
 this representation gives us two obvious clusters, but $k$-means fails to 
 separate them the way we would expect since they are not spherical clusters. 
@@ -510,7 +519,7 @@ result in a lower metric than the one constructed from $k$-means clustering.
 ```{r metrics}
 # construct Happrox
 H.approx <- two.eigen.df %>% 
-  dplyr::select(V2, V1) %>%  # i put this in the wrong order
+  dplyr::select(V1, V2) %>%
   as.matrix()
 
 #' @title construct H function
@@ -762,3 +771,96 @@ table(single.link.clust, single.link.clust.r4)
 
 According to the ratio cut metric, embedding in $\mathbb{R}^4$ is equivalent or 
 better than embedding in $\mathbb{R}^5$ in this particular case.
+
+### Another look at the relaxed optimization problem
+
+In both the double spiral and Big 5 data, we noticed that $H$ constructed from 
+single linkage clustering resulted in a lower ratio cut metric $\tr(H^T L H)$ 
+compared to $H_{approx}$, which is constructed from the eigenvectors of $L$. 
+This is unexpected, since the former is a (possible) solution to a 
+*constrained* optimization problem whereas the latter is the solution to an 
+*unconstrained* optimization problem. 
+
+Another look at the theorem mentioned in Section 5.2.2. of Luxburg's paper 
+says that the solution to 
+
+$$\min_{H \in \mathbb{R}^{n \times k}} \{ \tr(H^T L H)\}$$
+
+is given by combining the first $k$ eigenvectors of $L$, including the one 
+corresponding to the zero eigenvalue. Furthermore, 
+
+$$\min_{H \in \mathbb{R}^{n \times k}} \{ \tr(H^T L H)\} = 
+\lambda_0 + \lambda_1 + \cdots + \lambda_{k-1}$$
+
+where $\lambda_0 = 0$ in our particular case. 
+
+Finally, we know that the eigenvector that corresponds to $\lambda_0 = 0$ is 
+$h_0 = \frac{1}{\sqrt{n}} \mathbb{1}$, so when embedding, we can ignore this 
+outright. Then instead of embedding the graph in $\mathbb{R}^k$, we should 
+actually embed in what is effectively $\mathbb{R}^{k-1}$. 
+
+This has some interesting implications to one of our criteria in judging how 
+good a particular clustering is. Recall that we said that the matrix constructed 
+from a particular choice of clustering, $H_{clust}$, should be close to 
+$H_{approx}$, so we came up with 
+
+$$|| H_{clust} - H_{approx} ||^2_F$$
+
+as a metric for how good a particular clustering is. However, before, we used 
+$H_{approx} = \begin{bmatrix} h_1 & h_2 & \cdots & h_k \end{bmatrix}$ 
+instead of 
+$H_{approx} = \begin{bmatrix} h_0 & h_2 & \cdots & h_{k-1} \end{bmatrix}$. In 
+the following numerical example, we show using the double spiral that the 
+"natural" clustering results in a smaller $||H_{clust} - H_{approx}||_F^2$ 
+metric, and we construct a nonsensical clustering resulting in a $H_{clust}$ 
+that is closer to the former $H_{approx}$ than the natural clustering. 
+
+```{r spiral_eigenvectors}
+# construct W
+W <- spiral.df %>% 
+  dplyr::select(X, Y) %>% 
+  as.matrix() %>% 
+  mds.edm1() %>% 
+  graph.knn(k) %>% 
+  graph.adj()
+
+# construct L
+L <- graph.laplacian(W)
+
+# decompose L
+L.eigen <- eigen(L)
+
+# H_approx using h0 and h1
+H.01 <- L.eigen$vectors[, 200:199]
+
+# H_approx using h1 and h2
+H.12 <- L.eigen$vectors[, 199:198]
+
+# show that H.01 results in a lower ratio cut metric (which should be obvious)
+tr(t(H.01) %*% L %*% H.01)
+tr(t(H.12) %*% L %*% H.12)
+
+# the natural clustering from the spirals
+H.spiral <- construct.H(c(rep(1, 100), rep(2, 100)))
+
+# show that H.spiral is closer to H.01 than H.12
+min(c(norm(H.spiral - H.01, type = 'F'), 
+      norm(H.spiral[, 2:1] - H.01, type = 'F')))
+min(c(norm(H.spiral - H.12, type = 'F'), 
+      norm(H.spiral[, 2:1] - H.12, type = 'F')))
+
+# construct H.clust that is closer to H.12
+H.clust <- sapply(seq(nrow(W)), function(i) {
+  x <- rep(0, 2)
+  clust.assign <- which.max(H.12[i, ])
+  x[clust.assign] <- 1
+  return(x)
+}) %>% 
+  t()
+norm.const <- apply(H.clust, 2, function(x) sqrt(sum(x)))
+H.clust <- H.clust / norm.const
+
+# check that H.12 is closer to H.clust than H.spiral
+min(c(norm(H.clust - H.12, type = 'F'), 
+      norm(H.clust[, 2:1] - H.12, type = 'F')))
+```
