@@ -297,6 +297,7 @@ And in this case, $W$, $R$, and $\tr(H^T L H)$ all give different solutions.
 
 * Reconcile the three methods somehow
 * Explore other ways to recover $H$ from $H_*$
+* Extensions into $k > 2$?
 
 [^1]: https://arxiv.org/abs/0711.0189
 
