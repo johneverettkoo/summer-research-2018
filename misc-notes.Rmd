@@ -452,7 +452,7 @@ separate them the way we would expect since they are not spherical clusters.
 Projection to the unscaled space seems to perform especially poorly, and the 
 plots of the columns of $H_{approx}$ reveal why.
 
-```{r proj_clust, fig.cap = '2D embedding annotated by cluster assignments. From right to left: k-means on the unscaled embedding, k-means on the scaled embedding, and k-means on the 1D embedding.', fig.height = 3}
+```{r proj_clust, fig.cap = '2D embedding annotated by cluster assignments. From left to right: k-means on the unscaled embedding, k-means on the scaled embedding, and k-means on the 1D embedding.', fig.height = 3}
 two.eigen.df %<>% 
   dplyr::mutate(unscaled.clust = as.character(unscaled.clustering$cluster), 
                 scaled.clust = as.character(scaled.clustering$cluster), 
