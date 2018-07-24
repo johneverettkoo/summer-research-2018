@@ -650,7 +650,7 @@ kkm.lloyd.exchange <-
 qgraph(W, groups = factor(kkm.lloyd.exchange$clustering), node.width = 2, 
        title = 'kernel k-means using Lloyd then exchange')
 # final objective value
-kkm.lloyd.exchange$kmeans.obj
+kkm.lloyd.exchange$k.means
 ```
 
 Unfortunately that did not happen. It appears that Lloyd's algorithm found a 
