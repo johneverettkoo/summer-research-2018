@@ -571,3 +571,15 @@ possible clustering for ratio cut.
 
 [^4]: 
 [CRAN - Package qgraph](https://cran.r-project.org/web/packages/qgraph/index.html)
+
+## Summary
+
+* Solving ratio cut ($\argmin_H \tr(H^T L H)$) by relaxing the constraint on 
+$H$, realizing that it results in a spectral embedding, and using $k$-means 
+clustering on the embedding is a heuristic method that has no theory to show 
+it works well. We showed cases where it neither solves ratio cut nor identifies 
+a "reasonable" graph partitioning. 
+* Instead of using the relaxed solution to $\argmin_H \tr(H^T L H)$ embed the 
+graph, if we instead do a full (scaled) embedding, in our examples, $k$-means 
+identifies a better clustering according to the ratio cut metric.
+* We identified a simple graph where neither method is able to solve ratio cut.
